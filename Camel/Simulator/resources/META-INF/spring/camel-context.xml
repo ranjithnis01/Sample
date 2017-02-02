@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Configures the Camel Context-->
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+       http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd">
+	<bean id="bridgePropertyPlaceholder" class="com.sample.camel.props.TestBridgePropertyPlaceholderConfigurer">
+        <property name="ignoreUnresolvablePlaceholders" value="true" />
+        <property name="locations">
+            <list>
+	            <value>classpath:camel.properties</value>
+                <!-- <value>file:${karaf.home}/etc/de/de-config.properties</value>
+                <value>file:${karaf.home}/etc/de/de-route.properties</value> -->
+            </list>
+        </property>
+    </bean>	
+	<bean class="com.sample.test.TransformationBean" id="transformationBean">
+		<property name="interval" value="${test.input.number}"/>
+	</bean>
+	<bean class="com.sample.test.LoggingProcessor" id="loggingProcessor"/>
+
+<!-- Activemq configuration -->
+	<bean id="jms" class="org.apache.activemq.ActiveMQConnectionFactory">
+        <property name="brokerURL" value="tcp://localhost:61616"/>
+    </bean>
+
+    <bean id="poolConnectionFactory" class="org.apache.activemq.pool.PooledConnectionFactory">
+        <property name="connectionFactory" ref="jms"/>
+        <property name="maxConnections" value="16" />
+        <!--
+            PooledConnectionFactory closes connections that are in use
+            https://issues.apache.org/jira/browse/AMQ-4366
+        -->
+        <property name="idleTimeout" value="60000" />
+    </bean>
+
+    <bean id="amq-internal" class="org.apache.activemq.camel.component.ActiveMQComponent">
+        <property name="connectionFactory" ref="poolConnectionFactory"/>
+        <property name="errorHandlerLogStackTrace" value="false"/>
+    </bean>
+<!-- END Activemq configuration -->
+	<bean id="requestProcessor" class ="com.sample.camel.poc.RequestProcessor">
+	</bean>
+	
+	<bean id="responseProcessor" class ="com.sample.camel.poc.ResponseProcessor">
+	</bean>
+
+    <bean id="commandMessageProducerTemplate" class="org.apache.camel.impl.DefaultProducerTemplate" init-method="start" destroy-method="stop">
+        <constructor-arg name="camelContext" ref="firstCamelContext" />
+        <property name="defaultEndpointUri" value="amq-internal:queue:TEST_INPUT?replyTo=TEST_REPLY" />
+    </bean>	
+	<bean id="commandExecutor" class="com.sample.camel.poc.CommandExecutorImpl">
+        <property name="producer" ref="commandMessageProducerTemplate" />
+    </bean>
+	<bean id="genericErrorHandler" class="com.sample.camel.poc.GenericErrorHandler"/>
+  <camelContext id="firstCamelContext" xmlns="http://camel.apache.org/schema/spring">
+		<!-- <onException>
+            <exception>java.lang.Exception</exception>
+            <handled><constant>true</constant></handled>
+            <bean ref="genericErrorHandler" />
+        </onException> -->
+		<!--  define a route -->
+        <route>
+            <from uri="amq-internal:queue:TEST_INPUT?replyTo=TEST_INPUT"/>
+            <bean ref="requestProcessor" />
+            <bean ref="responseProcessor" />
+            <to uri="amq-internal:queue:TEST_OUTPUT" pattern="InOut" />
+        </route>
+
+
+    <!-- here is a sample which processes the input files
+         (leaving them in place - see the 'noop' flag)
+         then performs content based routing on the message using XPath -->
+    <!-- <route>
+      <from uri="file:src/data?noop=true"/>
+      <choice>
+        <when>
+          <xpath>/person/city = 'London'</xpath>
+          <log message="UK message"/>
+          <to uri="file:target/messages/uk"/>
+        </when>
+        <otherwise>
+          <log message="Other message"/>
+          <to uri="file:target/messages/others"/>
+        </otherwise>
+      </choice>
+    </route> -->
+	<!-- <route>
+		<from uri="file:target/inbox"/>
+			<process ref="loggingProcessor"/>
+			<bean ref="transformationBean"/>
+		<to uri="file:target/outbox"/>
+	</route>     -->
+  </camelContext>
+  
+
+<!-- for camel consumer classes -->
+<bean id="camelConsumer" class="com.sample.camel.poc.CamelConsumer"/> 
+<bean id="activemqCamel" class="org.apache.activemq.camel.component.ActiveMQComponent">
+  <property name="connectionFactory">
+    <bean class="org.apache.activemq.ActiveMQConnectionFactory">
+      <property name="brokerURL" value="tcp://localhost:61616"/>
+    </bean>
+  </property>
+</bean>
+ 
+<camelContext id="camelJmsConsumerContext" xmlns="http://camel.apache.org/schema/spring">
+    <route id="jmsListnerRoute">
+    	<from uri="activemqCamel:queue:test_destination_input"/>
+    	<bean ref="camelConsumer"></bean>
+    </route>
+</camelContext>
+
+
+<!-- sample language testing -->
+<bean id="orderService" class ="com.sample.camel.poc.SampleLanguageOrderService"></bean>
+<camelContext id="sampleLanguageContext" xmlns="http://camel.apache.org/schema/spring">
+    <route id="sampleLanguageRoute">
+    	<from uri="file:input/orders"/>
+		   <choice>
+		     <when>
+		         <simple>$simple{file:ext} == 'txt' || $simple{file:ext} == 'xml' and $simple{file:onlyname.noext} == 'test'</simple>
+		         <to uri="bean:orderService?method=handleTextFiles"/>
+		     </when>
+		     <when>
+		         <simple>$simple{file:onlyname.noext} == 'testing' and $simple{file:ext} == 'xmlas' || $simple{file:ext} == 'xmlasns'</simple>
+		         <to uri="bean:orderService?method=handleXmlFiles"/>
+		     </when>
+		     <otherwise>
+		         <to uri="bean:orderService?method=handleOtherFiles"/>
+		     </otherwise>
+		  </choice>
+    </route>
+</camelContext>
+
+</beans>
