@@ -8,7 +8,7 @@
   <packaging>jar</packaging>
   <version>0.0.1-SNAPSHOT</version>
 
-  <name>A Camel Spring Route</name>
+  <name>A Camel Spring Route demo</name>
   <url>http://www.myorganization.org</url>
 
   <properties>
